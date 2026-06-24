@@ -1,0 +1,1105 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+####NSDUH 2015 - 2019 Psychological Distress, Suicidality, and Major Depressive Episodes  + MDMA/ecstasy and Psilocybin analyses######
+##### Maya A. Seale ################
+####### May 11, 2026##################
+
+
+
+The goal of this project is to assess sexual orientation as a moderator between the associations of lifetime use of each of two classic psychedelic substances, Psilocybin and MDMA, and psychopathological outcomes of suicidality, psychological distress, and major depressive episodes
+I hypothesized that sexual orientation would moderate this association
+
+The full manuscript detailing background, methods, and discussion  can be found here: N/A not yet published
+
+The three sexual orientation groups investigated are "Heterosexual" "Bisexual" and"Gay/lesbian" as constrained by the NSDUH questionnaire
+
+## Reproducibility notes
+
+Data: NSDUH public-use files, 2015–2019 (SAMHSA; available from the Substance Abuse and Mental Health Data Archive, https://www.datafiles.samhsa.gov/). Place the annual files (NSDUH2015Data.RDS … NSDUH2019Data.RDS) in the working directory before running.
+
+This document runs in R; R and package versions are recorded by `sessionInfo()` in the final chunk. No random-number generation is used, so results are deterministic.
+
+# Importing Libraries
+
+```{r}
+# Importing Libraries 
+if (!require("pacman")) {install.packages("pacman"); require("pacman")}
+
+p_load("survey", "plyr", "labelled", "knitr", "dplyr", "tableone")
+
+```
+
+# Helper functions: consistent ORs, CIs, and p-values for svyglm
+```{r}
+
+# CI on the log scale (drop-in replacement): exp(cbind(OR=coef(m), or_confint(m)))
+or_confint <- function(model, level = 0.95) {
+  co  <- summary(model)$coefficients
+  est <- co[, "Estimate"]; se <- co[, "Std. Error"]
+  tcrit <- qt(1 - (1 - level)/2, model$df.residual)
+  ci <- cbind(est - tcrit*se, est + tcrit*se)
+  colnames(ci) <- c("2.5 %", "97.5 %"); rownames(ci) <- rownames(co); ci
+}
+
+# Tidy OR / 95% CI / p table (CI and p guaranteed consistent)
+or_table <- function(model, level = 0.95, digits = 2) {
+  co  <- summary(model)$coefficients
+  est <- co[, "Estimate"]; se <- co[, "Std. Error"]
+  tcrit <- qt(1 - (1 - level)/2, model$df.residual)
+  data.frame(term = rownames(co),
+             OR    = round(exp(est), digits),
+             lower = round(exp(est - tcrit*se), digits),
+             upper = round(exp(est + tcrit*se), digits),
+             p     = round(co[, "Pr(>|t|)"], 5), row.names = NULL)
+}
+
+# Flags any term where CI and p still disagree (should print "OK")
+check_consistency <- function(model) {
+  t <- or_table(model)
+  excl1 <- (t$lower > 1 & t$upper > 1) | (t$lower < 1 & t$upper < 1)
+  bad <- t[excl1 != (t$p < .05), ]
+  if (nrow(bad) == 0) message("OK: CIs and p-values agree.") else print(bad)
+  invisible(bad)
+}
+```
+
+# Importing the NSDUH dataset by year
+```{r}
+PUF2015_021518 <- readRDS("NSDUH2015Data.RDS")
+PUF2016_022818 <- readRDS("NSDUH2016Data.RDS")
+PUF2017_100918 <- readRDS("NSDUH2017Data.RDS")
+PUF2018_100819 <- readRDS("NSDUH2018Data.RDS")
+PUF2019_100920 <- readRDS("NSDUH2019Data.RDS")
+```
+
+# Selecting the variables needed from each year
+```{r}
+
+DATA2015 <- PUF2015_021518 %>% dplyr::select(QUESTID2, 
+amdelt, amdeyr, amdeimp,mhsuithk, mhsuipln, spdmon, # Dependent Variables
+ecstmoflag,  PSILCY2, # Independent Variables                                     
+sexident, # Moderator 
+AGE2,irmaritstat, IREDUHIGHST2, CATAG6, irsex, NEWRACE2, income,  # Demographic Covariates 
+rskyfqtes, cocflag, herflag, pcpflag, ecstmoflag, inhalflag , pnranyflag, trqanyflag,ketminflag, AMYLNIT2, stmanyflag, sedanyflag, mrjflag,  lsdflag, PEYOTE2, MESC2, # Drug and Behavioral Covariates
+ANALWT_C, vestr, verep, # Survey Weights
+
+)
+
+DATA2015 <- DATA2015 %>%
+  mutate(year = 2015)
+```
+
+```{r}
+DATA2016 <- PUF2016_022818 %>% dplyr::select(QUESTID2, 
+amdelt, amdeyr, amdeimp,mhsuithk, mhsuipln, spdmon, # Dependent Variables
+ecstmoflag,  PSILCY2, # Independent Variables                                     
+sexident, # Moderator 
+AGE2,irmarit, IREDUHIGHST2, CATAG6, irsex, NEWRACE2, income,  # Demographic Covariates 
+rskyfqtes, cocflag, herflag, pcpflag, ecstmoflag, inhalflag , pnranyflag, trqanyflag,ketminflag, AMYLNIT2, stmanyflag, sedanyflag, mrjflag,  lsdflag, PEYOTE2, MESC2, # Drug and Behavioral Covariates
+ANALWT_C, vestr, verep, # Survey Weights
+
+)
+DATA2016 <- DATA2016 %>%
+  mutate(year = 2016)
+```
+
+```{r}
+DATA2017 <- PUF2017_100918 %>% dplyr::select(QUESTID2, 
+amdelt, amdeyr, amdeimp,mhsuithk, mhsuipln, spdmon, # Dependent Variables
+ecstmoflag,  PSILCY2, # Independent Variables                                     
+sexident, # Moderator 
+AGE2,irmarit, IREDUHIGHST2, CATAG6, irsex, NEWRACE2, income,  # Demographic Covariates 
+rskyfqtes, cocflag, herflag, pcpflag, ecstmoflag, inhalflag , pnranyflag, trqanyflag,ketminflag, AMYLNIT2, stmanyflag, sedanyflag, mrjflag,  lsdflag, PEYOTE2, MESC2, # Drug and Behavioral Covariates
+ANALWT_C, vestr, verep, # Survey Weights
+)
+DATA2017 <- DATA2017 %>%
+  mutate(year = 2017)
+```
+
+```{r}
+DATA2018 <- PUF2018_100819 %>% dplyr::select(
+QUESTID2, 
+amdelt, amdeyr, amdeimp,mhsuithk, mhsuipln, spdmon, # Dependent Variables
+ecstmoflag,  PSILCY2, # Independent Variables                                     
+sexident, # Moderator 
+AGE2,irmarit, IREDUHIGHST2, CATAG6, irsex, NEWRACE2, income,  # Demographic Covariates 
+rskyfqtes, cocflag, herflag, pcpflag, ecstmoflag, inhalflag , pnranyflag, trqanyflag,ketminflag, AMYLNIT2, stmanyflag, sedanyflag, mrjflag,  lsdflag, PEYOTE2, MESC2, # Drug and Behavioral Covariates
+ANALWT_C, vestr, verep, # Survey Weights
+
+)
+DATA2018 <- DATA2018 %>%
+  mutate(year = 2018)
+```
+
+```{r}
+DATA2019 <- PUF2019_100920 %>% dplyr::select(
+QUESTID2, 
+amdelt, amdeyr, amdeimp,mhsuithk, mhsuipln, spdmon, # Dependent Variables
+ecstmoflag,  PSILCY2, # Independent Variables                                     
+sexident, # Moderator 
+AGE2,irmarit, IREDUHIGHST2, CATAG6, irsex, NEWRACE2, income,  # Demographic Covariates 
+rskyfqtes, cocflag, herflag, pcpflag, ecstmoflag, inhalflag , pnranyflag, trqanyflag,ketminflag, AMYLNIT2, stmanyflag, sedanyflag, mrjflag,  lsdflag, PEYOTE2, MESC2, # Drug and Behavioral Covariates
+ANALWT_C, vestr, verep, # Survey Weights
+)
+DATA2019 <- DATA2019 %>%
+  mutate(year = 2019)
+```
+
+
+## Merge each year into one DataFrame
+```{r}
+
+NSDUH2015to2019DataList <- list(DATA2015, DATA2016, DATA2017, DATA2018, DATA2019)                                                                                                                                                  
+NSDUH2015to2019Data  <- Reduce(
+  function(x, y) merge(x, y, all=TRUE), NSDUH2015to2019DataList, accumulate=FALSE)
+
+##Exclude kids
+NSDUH2015to2019Data <-subset(NSDUH2015to2019Data,!CATAG6=="1")
+
+```
+
+
+### Variable cleaning and collapsing 
+#### Create Marriage Variable (combining 2015 with other years)
+```{r}
+# Create Marriage Variable (combining 2015 with other years)
+
+# Remove irmarit -9 values (equivalent to not present) by pooling with irmaritstat (2015 variable only)
+# irmaritstat is 2015 only (they say to consider before pooling, but because it's a covariate, it's okay. under guidance of Grant Jones)
+plyr::count(NSDUH2015to2019Data$irmarit)
+NSDUH2015to2019Data$MarriageVariable <- ifelse(is.na(NSDUH2015to2019Data$irmarit), NSDUH2015to2019Data$irmaritstat, NSDUH2015to2019Data$irmarit)
+plyr::count(NSDUH2015to2019Data$MarriageVariable)
+```
+
+#### Create Risk Variable 
+```{r}
+# Create Risk Variable 
+NSDUH2015to2019Data$RiskyVariable <- NSDUH2015to2019Data$rskyfqtes
+#Remove all data with a response above 4 (essentially an NA)
+NSDUH2015to2019Data$RiskyVariable <- ifelse (NSDUH2015to2019Data$RiskyVariable >4, NA, NSDUH2015to2019Data$RiskyVariable)
+plyr::count(NSDUH2015to2019Data$RiskyVariable)
+```
+
+#### Recode Outcome Variables to exclude -9 values 
+```{r}
+###Recode -9 (no data for that year) to NA for the six analyzed outcome variables.
+NSDUH2015to2019Data$spdmon <- ifelse(NSDUH2015to2019Data$spdmon == -9, NA, NSDUH2015to2019Data$spdmon)
+NSDUH2015to2019Data$mhsuithk <- ifelse(NSDUH2015to2019Data$mhsuithk == -9, NA, NSDUH2015to2019Data$mhsuithk)
+NSDUH2015to2019Data$mhsuipln <- ifelse(NSDUH2015to2019Data$mhsuipln == -9, NA, NSDUH2015to2019Data$mhsuipln)
+NSDUH2015to2019Data$amdeyr <- ifelse(NSDUH2015to2019Data$amdeyr == -9, NA, NSDUH2015to2019Data$amdeyr)
+NSDUH2015to2019Data$amdelt <- ifelse(NSDUH2015to2019Data$amdelt == -9, NA, NSDUH2015to2019Data$amdelt)
+NSDUH2015to2019Data$amdeimp <- ifelse(NSDUH2015to2019Data$amdeimp == -9, NA, NSDUH2015to2019Data$amdeimp)
+```
+
+#### Code independent variables to be "0" and "1" 
+```{r}
+# Code independent variables to be "0" and "1" 
+# Recoding the '2's to '0's is valid because the NSDUH codes these variables to be '2' if 'No' and '1' if 'Yes'.
+# The following code will then code 'Yes' as '1' and 'No' as '0'
+# Only Depression Variables are coded like this 
+NSDUH2015to2019Data$amdeyr <- ifelse(NSDUH2015to2019Data$amdeyr == 2, 0, NSDUH2015to2019Data$amdeyr)
+NSDUH2015to2019Data$amdelt <- ifelse(NSDUH2015to2019Data$amdelt == 2, 0, NSDUH2015to2019Data$amdelt)
+NSDUH2015to2019Data$amdeimp <- ifelse(NSDUH2015to2019Data$amdeimp == 2, 0, NSDUH2015to2019Data$amdeimp)
+
+```
+
+```{r}
+plyr::count(NSDUH2015to2019Data$spdmon)
+plyr::count(NSDUH2015to2019Data$mhsuithk)
+plyr::count(NSDUH2015to2019Data$mhsuipln)
+plyr::count(NSDUH2015to2019Data$amdeyr)
+plyr::count(NSDUH2015to2019Data$amdelt)
+plyr::count(NSDUH2015to2019Data$amdeimp)
+```
+
+
+# Keep only the data with "heterosexual", "bisexual", or "gay/lesbian" responses
+```{r}
+NSDUH2015to2019Data <- NSDUH2015to2019Data %>%
+  mutate(sexident = case_when(
+    sexident == 1 ~ "Heterosexual",
+    sexident == 2 ~ "Lesbian or Gay",
+    sexident == 3 ~ "Bisexual",
+    sexident == 85 ~ "BAD DATA Logically assigned",
+    sexident == 94 ~ "DON'T KNOW",
+    sexident == 97 ~ "REFUSED",
+    sexident == 98 ~ "BLANK (NO ANSWER)",
+    sexident == 99 ~ "LEGITIMATE SKIP",
+    TRUE ~ as.character(sexident)  # Just in case there's like, other stuff
+  )) %>%
+  filter(sexident %in% c("Heterosexual", "Lesbian or Gay", "Bisexual"))  # Filter to keep only 1, 2, 3
+
+plyr::count(NSDUH2015to2019Data$sexident) 
+```
+# Rename Covariates 
+```{r}
+NSDUH2015to2019Data <- NSDUH2015to2019Data %>%
+  dplyr::rename(
+    PREEducationVariable = IREDUHIGHST2,
+    EcstasyVariable = ecstmoflag,
+    InhalantVariable = inhalflag,
+    PainRelieverVariable = pnranyflag,
+    TranquilizerVariable = trqanyflag,
+    StimulantVariable = stmanyflag,
+    SedativeVariable = sedanyflag,
+    KetamineVar = ketminflag,
+    PoppersVariable = AMYLNIT2 # Ever INHALED AMYL NITRITE, "POPPERS", RUSH, ETC.
+)
+```
+
+
+```{r}
+####Counts of Variables (to confirm that there are no -9s or other null numerical values)####
+plyr::count(NSDUH2015to2019Data$spdmon)
+plyr::count(NSDUH2015to2019Data$mhsuithk)
+plyr::count(NSDUH2015to2019Data$mhsuipln)
+plyr::count(NSDUH2015to2019Data$amdeyr)
+plyr::count(NSDUH2015to2019Data$amdelt)
+plyr::count(NSDUH2015to2019Data$amdeimp)
+plyr::count(NSDUH2015to2019Data$MarriageVariable)
+plyr::count(NSDUH2015to2019Data$PREEducationVariable)
+plyr::count(NSDUH2015to2019Data$EcstasyVariable)
+plyr::count(NSDUH2015to2019Data$InhalantVariable)
+plyr::count(NSDUH2015to2019Data$PainRelieverVariable)
+plyr::count(NSDUH2015to2019Data$TranquilizerVariable)
+plyr::count(NSDUH2015to2019Data$StimulantVariable)
+plyr::count(NSDUH2015to2019Data$SedativeVariable)
+plyr::count(NSDUH2015to2019Data$RiskyVariable)
+plyr::count(NSDUH2015to2019Data$PSILCY2)
+plyr::count(NSDUH2015to2019Data$PEYOTE2)
+plyr::count(NSDUH2015to2019Data$lsdflag)
+plyr::count(NSDUH2015to2019Data$MESC2)
+plyr::count(NSDUH2015to2019Data$CATAG6)
+plyr::count(NSDUH2015to2019Data$irsex)
+plyr::count(NSDUH2015to2019Data$NEWRACE2)
+plyr::count(NSDUH2015to2019Data$income)
+plyr::count(NSDUH2015to2019Data$cocflag)
+plyr::count(NSDUH2015to2019Data$herflag)
+plyr::count(NSDUH2015to2019Data$pcpflag)
+plyr::count(NSDUH2015to2019Data$mrjflag)
+plyr::count(NSDUH2015to2019Data$KetamineVar)
+plyr::count(NSDUH2015to2019Data$amdeimp)
+plyr::count(NSDUH2015to2019Data$PoppersVariable)
+
+ 
+```
+# VARIABLE LABELING/CONVERSION INTO FACTORS 
+```{r}
+# Convert Lifetime Use Variables and Outcome Variables into Factors
+# Overall - Main Dependent/Independent Variables
+NSDUH2015to2019Data$spdmon <- as.factor(NSDUH2015to2019Data$spdmon)
+NSDUH2015to2019Data$mhsuithk <- as.factor(NSDUH2015to2019Data$mhsuithk)
+NSDUH2015to2019Data$mhsuipln <- as.factor(NSDUH2015to2019Data$mhsuipln)
+NSDUH2015to2019Data$amdeyr <- as.factor(NSDUH2015to2019Data$amdeyr)
+NSDUH2015to2019Data$amdelt <- as.factor(NSDUH2015to2019Data$amdelt)
+NSDUH2015to2019Data$amdeimp <- as.factor(NSDUH2015to2019Data$amdeimp)
+NSDUH2015to2019Data$EcstasyVariable <- as.factor(NSDUH2015to2019Data$EcstasyVariable)
+NSDUH2015to2019Data$InhalantVariable <- as.factor(NSDUH2015to2019Data$InhalantVariable)
+NSDUH2015to2019Data$PainRelieverVariable <- as.factor(NSDUH2015to2019Data$PainRelieverVariable)
+NSDUH2015to2019Data$TranquilizerVariable <- as.factor(NSDUH2015to2019Data$TranquilizerVariable)
+NSDUH2015to2019Data$StimulantVariable <- as.factor(NSDUH2015to2019Data$StimulantVariable)
+NSDUH2015to2019Data$SedativeVariable <- as.factor(NSDUH2015to2019Data$SedativeVariable)
+NSDUH2015to2019Data$PSILCY2 <- as.factor(NSDUH2015to2019Data$PSILCY2)
+NSDUH2015to2019Data$PEYOTE2 <- as.factor(NSDUH2015to2019Data$PEYOTE2)
+NSDUH2015to2019Data$lsdflag <- as.factor(NSDUH2015to2019Data$lsdflag)
+NSDUH2015to2019Data$MESC2 <- as.factor(NSDUH2015to2019Data$MESC2)
+NSDUH2015to2019Data$cocflag <- as.factor(NSDUH2015to2019Data$cocflag)
+NSDUH2015to2019Data$herflag <- as.factor(NSDUH2015to2019Data$herflag)
+NSDUH2015to2019Data$pcpflag <- as.factor(NSDUH2015to2019Data$pcpflag)
+NSDUH2015to2019Data$mrjflag <- as.factor(NSDUH2015to2019Data$mrjflag)
+NSDUH2015to2019Data$KetamineVar <- as.factor(NSDUH2015to2019Data$KetamineVar)
+NSDUH2015to2019Data$PoppersVariable <- as.factor(NSDUH2015to2019Data$PoppersVariable)
+NSDUH2015to2019Data$sexident <- as.factor(NSDUH2015to2019Data$sexident)
+# Relevel SexIdent Variable 
+NSDUH2015to2019Data$sexident <- relevel(NSDUH2015to2019Data$sexident, ref = "Heterosexual")
+```
+###Converting Demographic Factors/Covariates into Factors#####
+
+```{r}
+#Year
+#Overall - Year
+NSDUH2015to2019Data$year <- as.factor(NSDUH2015to2019Data$year)
+
+
+###Marriage (Change Factors for All Four SO Data Sets)
+#Overall - Marriage
+NSDUH2015to2019Data$MarriageVariable <- factor(NSDUH2015to2019Data$MarriageVariable,
+                                                  levels = c(1,2,3,4),
+                                                  labels = c("Married", "Widowed", "Divorced or Separated", "Never Been Married"))
+
+####Education
+NSDUH2015to2019Data$EducationVariable <- ifelse(NSDUH2015to2019Data$PREEducationVariable<=4,1,
+                                                   ifelse(NSDUH2015to2019Data$PREEducationVariable<=8, 2, 
+                                                          ifelse(NSDUH2015to2019Data$PREEducationVariable >=9, 3,NSDUH2015to2019Data$PREEducationVariable)))
+
+plyr::count(NSDUH2015to2019Data$EducationVariable)
+
+NSDUH2015to2019Data$EducationVariable <- factor(NSDUH2015to2019Data$EducationVariable,
+                                              levels = c(1,2,3),
+                                              labels = c("Less than HS", "Some HS/HS Grad", "Some College or Above"))
+plyr::count(NSDUH2015to2019Data$EducationVariable)
+
+#Age
+#Overall - Age
+NSDUH2015to2019Data$CATAG6 <- factor(NSDUH2015to2019Data$CATAG6,
+                                        levels = c(2,3,4,5),
+                                        labels = c("18-25", "26-34", "35-49", "50+"))
+
+
+###Sex
+#Overall - Sex
+NSDUH2015to2019Data$irsex <- factor(NSDUH2015to2019Data$irsex,
+                                       levels = c(1,2),
+                                       labels = c("Male", "Female"))
+
+###Yearly Household Income
+#Overall - Income
+NSDUH2015to2019Data$income <- factor(NSDUH2015to2019Data$income,
+                                        levels = c(1,2,3,4),
+                                        labels = c("<$20,000", "$20,000-$49,999", "$50,000-$74,999","$75,000+"))
+#Overall - Race
+NSDUH2015to2019Data$NEWRACE2 <- factor(NSDUH2015to2019Data$NEWRACE2,
+                                        levels = c(1,2,3,4,5,6,7),
+                                        labels = c("NonHisp White", "NonHisp Black/Afr Am", "NonHisp Native Am/AK Native","NonHisp Native HI/Other Pac Isl","NonHisp Asian", "NonHisp more than one race", "Hispanic"))
+#Self-Reported Engagement in Risky Behavior
+#Overall
+NSDUH2015to2019Data$RiskyVariable <- factor(NSDUH2015to2019Data$RiskyVariable,
+                                           levels = c(1,2,3,4),
+                                           labels = c("Never", "Seldom", "Sometimes", "Always"))
+
+```
+
+```{r}
+plyr::count(NSDUH2015to2019Data$sexident)
+```
+
+## Split into subgroups, relabel, factor, and check counts
+```{r}
+# Split
+# Pooled 5-year analysis weight (SAMHSA guidance for multi-year NSDUH): divide the single-year
+# weight by the number of years. This is a CONSTANT rescaling, so it does not change the odds
+# ratios, design-based standard errors, or weighted proportions; it only corrects absolute
+# population-count estimates (not reported here).
+NSDUH2015to2019Data$ANALWT_pooled <- NSDUH2015to2019Data$ANALWT_C / 5
+
+NSDUH2015to2019DataHet <- subset(NSDUH2015to2019Data, sexident == 'Heterosexual')
+NSDUH2015to2019DataBis <- subset(NSDUH2015to2019Data, sexident == 'Bisexual')
+NSDUH2015to2019GayLesbian <- subset(NSDUH2015to2019Data, sexident == 'Lesbian or Gay')
+```
+```{r}
+
+```
+
+
+```{r}
+#Relabel (Have to do this after the split, as the labels do not transfer over)
+var_label(NSDUH2015to2019Data) <- list(PSILCY2 = "Psilocybin", EcstasyVariable = "MDMA/Ecstasy",
+                                          lsdflag = "LSD", PEYOTE2 = "Peyote", MESC2 = "Mescaline",
+                                          cocflag = "Cocaine", herflag = "Heroin",
+                                          pcpflag = "PCP", InhalantVariable = "Inhalants",
+                                          PainRelieverVariable = "Pain Relievers", TranquilizerVariable = "Tranquilizers",
+                                          StimulantVariable = "Stimulants", SedativeVariable = "Sedatives",
+                                          mrjflag = "Marijuana", NEWRACE2 = "Race/Ethnicity", spdmon = "Past Month Distress",  mhsuithk = "Past Yr. Suicidal Ideation",
+                                          mhsuipln = "Past Yr. Suicidal Planning",  amdeyr = "Past Year MDE",amdelt = "Lifetime MDE", amdeimp = "Severe Impairment - MDE",
+                                          MarriageVariable = "Marital Status", income = "Yearly Household Income",
+                                          EducationVariable = "Educational Attainment", KetamineVar = "Ketamine", PoppersVariable = "Poppers") 
+
+var_label(NSDUH2015to2019DataHet) <- list(PSILCY2 = "Psilocybin", EcstasyVariable = "MDMA/Ecstasy",
+                                               lsdflag = "LSD", PEYOTE2 = "Peyote", MESC2 = "Mescaline",
+                                               cocflag = "Cocaine", herflag = "Heroin",
+                                               pcpflag = "PCP", InhalantVariable = "Inhalants",
+                                               PainRelieverVariable = "Pain Relievers", TranquilizerVariable = "Tranquilizers",
+                                               StimulantVariable = "Stimulants", SedativeVariable = "Sedatives",
+                                               mrjflag = "Marijuana", NEWRACE2 = "Race/Ethnicity", spdmon = "Past Month Distress",  mhsuithk = "Past Yr. Suicidal Ideation",
+                                               mhsuipln = "Past Yr. Suicidal Planning", amdeyr = "Past Year MDE",amdelt = "Lifetime MDE", amdeimp = "Severe Impairment - MDE",
+                                               MarriageVariable = "Marital Status", income = "Yearly Household Income",
+                                               EducationVariable = "Educational Attainment",KetamineVar = "Ketamine", PoppersVariable = "Poppers") 
+
+var_label(NSDUH2015to2019DataBis) <- list(PSILCY2 = "Psilocybin", EcstasyVariable = "MDMA/Ecstasy",
+                                               lsdflag = "LSD", PEYOTE2 = "Peyote", MESC2 = "Mescaline",
+                                               cocflag = "Cocaine", herflag = "Heroin",
+                                               pcpflag = "PCP", InhalantVariable = "Inhalants",
+                                               PainRelieverVariable = "Pain Relievers", TranquilizerVariable = "Tranquilizers",
+                                               StimulantVariable = "Stimulants", SedativeVariable = "Sedatives",
+                                               mrjflag = "Marijuana", NEWRACE2 = "Race/Ethnicity", spdmon = "Past Month Distress",  mhsuithk = "Past Yr. Suicidal Ideation",
+                                               mhsuipln = "Past Yr. Suicidal Planning", amdeyr = "Past Year MDE",amdelt = "Lifetime MDE", amdeimp = "Severe Impairment - MDE",
+                                               MarriageVariable = "Marital Status", income = "Yearly Household Income",
+                                               EducationVariable = "Educational Attainment",KetamineVar = "Ketamine", PoppersVariable = "Poppers") 
+
+var_label(NSDUH2015to2019GayLesbian) <- list(PSILCY2 = "Psilocybin", EcstasyVariable = "MDMA/Ecstasy",
+                                                                lsdflag = "LSD", PEYOTE2 = "Peyote", MESC2 = "Mescaline",
+                                                                cocflag = "Cocaine", herflag = "Heroin",
+                                                                pcpflag = "PCP", InhalantVariable = "Inhalants",
+                                                                PainRelieverVariable = "Pain Relievers", TranquilizerVariable = "Tranquilizers",
+                                                                StimulantVariable = "Stimulants", SedativeVariable = "Sedatives",
+                                                                mrjflag = "Marijuana", NEWRACE2 = "Race/Ethnicity", spdmon = "Past Month Distress",  mhsuithk = "Past Yr. Suicidal Ideation",
+                                                                mhsuipln = "Past Yr. Suicidal Planning", amdeyr = "Past Year MDE",amdelt = "Lifetime MDE", amdeimp = "Severe Impairment - MDE",
+                                                                MarriageVariable = "Marital Status", income = "Yearly Household Income",
+                                                                EducationVariable = "Educational Attainment", KetamineVar = "Ketamine", PoppersVariable = "Poppers") 
+
+```
+```{r}
+plyr::count(NSDUH2015to2019Data$spdmon)
+plyr::count(NSDUH2015to2019Data$mhsuithk)
+plyr::count(NSDUH2015to2019Data$mhsuipln)
+plyr::count(NSDUH2015to2019Data$amdeyr)
+plyr::count(NSDUH2015to2019Data$amdelt)
+plyr::count(NSDUH2015to2019Data$amdeimp)
+```
+
+Checking Variables for '-9' responses
+
+```{r}
+#### Re-Counts of Variables (to confirm that there are no -9s or other null numerical values) ####
+plyr::count(NSDUH2015to2019Data$spdmon)
+plyr::count(NSDUH2015to2019Data$mhsuithk)
+plyr::count(NSDUH2015to2019Data$mhsuipln)
+plyr::count(NSDUH2015to2019Data$amdeyr)
+plyr::count(NSDUH2015to2019Data$amdelt)
+plyr::count(NSDUH2015to2019Data$amdeimp)
+plyr::count(NSDUH2015to2019Data$MarriageVariable)
+plyr::count(NSDUH2015to2019Data$PREEducationVariable)
+plyr::count(NSDUH2015to2019Data$EcstasyVariable)
+plyr::count(NSDUH2015to2019Data$InhalantVariable)
+plyr::count(NSDUH2015to2019Data$PainRelieverVariable)
+plyr::count(NSDUH2015to2019Data$TranquilizerVariable)
+plyr::count(NSDUH2015to2019Data$StimulantVariable)
+plyr::count(NSDUH2015to2019Data$SedativeVariable)
+plyr::count(NSDUH2015to2019Data$RiskyVariable)
+plyr::count(NSDUH2015to2019Data$PSILCY2)
+plyr::count(NSDUH2015to2019Data$PEYOTE2)
+plyr::count(NSDUH2015to2019Data$lsdflag)
+plyr::count(NSDUH2015to2019Data$MESC2)
+plyr::count(NSDUH2015to2019Data$CATAG6)
+plyr::count(NSDUH2015to2019Data$irsex)
+plyr::count(NSDUH2015to2019Data$NEWRACE2)
+plyr::count(NSDUH2015to2019Data$income)
+plyr::count(NSDUH2015to2019Data$cocflag)
+plyr::count(NSDUH2015to2019Data$herflag)
+plyr::count(NSDUH2015to2019Data$pcpflag)
+plyr::count(NSDUH2015to2019Data$mrjflag)
+plyr::count(NSDUH2015to2019Data$KetamineVar)
+plyr::count(NSDUH2015to2019Data$amdeimp)
+plyr::count(NSDUH2015to2019Data$PoppersVariable)
+```
+
+```{r}
+#### Counts of Variables (to confirm that there are no -9s or other null numerical values) ####
+plyr::count(NSDUH2015to2019DataBis$spdmon)
+plyr::count(NSDUH2015to2019DataBis$mhsuithk)
+plyr::count(NSDUH2015to2019DataBis$mhsuipln)
+plyr::count(NSDUH2015to2019DataBis$amdeyr)
+plyr::count(NSDUH2015to2019DataBis$amdelt)
+plyr::count(NSDUH2015to2019DataBis$amdeimp)
+plyr::count(NSDUH2015to2019DataBis$MarriageVariable)
+plyr::count(NSDUH2015to2019DataBis$PREEducationVariable)
+plyr::count(NSDUH2015to2019DataBis$EcstasyVariable)
+plyr::count(NSDUH2015to2019DataBis$InhalantVariable)
+plyr::count(NSDUH2015to2019DataBis$PainRelieverVariable)
+plyr::count(NSDUH2015to2019DataBis$TranquilizerVariable)
+plyr::count(NSDUH2015to2019DataBis$StimulantVariable)
+plyr::count(NSDUH2015to2019DataBis$SedativeVariable)
+plyr::count(NSDUH2015to2019DataBis$RiskyVariable)
+plyr::count(NSDUH2015to2019DataBis$PSILCY2)
+plyr::count(NSDUH2015to2019DataBis$PEYOTE2)
+plyr::count(NSDUH2015to2019DataBis$lsdflag)
+plyr::count(NSDUH2015to2019DataBis$MESC2)
+plyr::count(NSDUH2015to2019DataBis$CATAG6)
+plyr::count(NSDUH2015to2019DataBis$irsex)
+plyr::count(NSDUH2015to2019DataBis$NEWRACE2)
+plyr::count(NSDUH2015to2019DataBis$income)
+plyr::count(NSDUH2015to2019DataBis$cocflag)
+plyr::count(NSDUH2015to2019DataBis$herflag)
+plyr::count(NSDUH2015to2019DataBis$pcpflag)
+plyr::count(NSDUH2015to2019DataBis$mrjflag)
+plyr::count(NSDUH2015to2019DataBis$KetamineVar)
+plyr::count(NSDUH2015to2019DataBis$amdeimp)
+plyr::count(NSDUH2015to2019DataBis$PoppersVariable)
+
+```
+
+```{r}
+#### Counts of Variables (to confirm that there are no -9s or other null numerical values) ####
+plyr::count(NSDUH2015to2019GayLesbian$spdmon)
+plyr::count(NSDUH2015to2019GayLesbian$mhsuithk)
+plyr::count(NSDUH2015to2019GayLesbian$mhsuipln)
+plyr::count(NSDUH2015to2019GayLesbian$amdeyr)
+plyr::count(NSDUH2015to2019GayLesbian$amdelt)
+plyr::count(NSDUH2015to2019GayLesbian$amdeimp)
+plyr::count(NSDUH2015to2019GayLesbian$MarriageVariable)
+plyr::count(NSDUH2015to2019GayLesbian$PREEducationVariable)
+plyr::count(NSDUH2015to2019GayLesbian$EcstasyVariable)
+plyr::count(NSDUH2015to2019GayLesbian$InhalantVariable)
+plyr::count(NSDUH2015to2019GayLesbian$PainRelieverVariable)
+plyr::count(NSDUH2015to2019GayLesbian$TranquilizerVariable)
+plyr::count(NSDUH2015to2019GayLesbian$StimulantVariable)
+plyr::count(NSDUH2015to2019GayLesbian$SedativeVariable)
+plyr::count(NSDUH2015to2019GayLesbian$RiskyVariable)
+plyr::count(NSDUH2015to2019GayLesbian$PSILCY2)
+plyr::count(NSDUH2015to2019GayLesbian$PEYOTE2)
+plyr::count(NSDUH2015to2019GayLesbian$lsdflag)
+plyr::count(NSDUH2015to2019GayLesbian$MESC2)
+plyr::count(NSDUH2015to2019GayLesbian$CATAG6)
+plyr::count(NSDUH2015to2019GayLesbian$irsex)
+plyr::count(NSDUH2015to2019GayLesbian$NEWRACE2)
+plyr::count(NSDUH2015to2019GayLesbian$income)
+plyr::count(NSDUH2015to2019GayLesbian$cocflag)
+plyr::count(NSDUH2015to2019GayLesbian$herflag)
+plyr::count(NSDUH2015to2019GayLesbian$pcpflag)
+plyr::count(NSDUH2015to2019GayLesbian$mrjflag)
+plyr::count(NSDUH2015to2019GayLesbian$KetamineVar)
+plyr::count(NSDUH2015to2019GayLesbian$amdeimp)
+plyr::count(NSDUH2015to2019GayLesbian$PoppersVariable)
+
+```
+```{r}
+#### Counts of Variables (to confirm that there are no -9s or other null numerical values) ####
+plyr::count(NSDUH2015to2019DataHet$spdmon)
+plyr::count(NSDUH2015to2019DataHet$mhsuithk)
+plyr::count(NSDUH2015to2019DataHet$mhsuipln)
+plyr::count(NSDUH2015to2019DataHet$amdeyr)
+plyr::count(NSDUH2015to2019DataHet$amdelt)
+plyr::count(NSDUH2015to2019DataHet$amdeimp)
+plyr::count(NSDUH2015to2019DataHet$MarriageVariable)
+plyr::count(NSDUH2015to2019DataHet$PREEducationVariable)
+plyr::count(NSDUH2015to2019DataHet$EcstasyVariable)
+plyr::count(NSDUH2015to2019DataHet$InhalantVariable)
+plyr::count(NSDUH2015to2019DataHet$PainRelieverVariable)
+plyr::count(NSDUH2015to2019DataHet$TranquilizerVariable)
+plyr::count(NSDUH2015to2019DataHet$StimulantVariable)
+plyr::count(NSDUH2015to2019DataHet$SedativeVariable)
+plyr::count(NSDUH2015to2019DataHet$RiskyVariable)
+plyr::count(NSDUH2015to2019DataHet$PSILCY2)
+plyr::count(NSDUH2015to2019DataHet$PEYOTE2)
+plyr::count(NSDUH2015to2019DataHet$lsdflag)
+plyr::count(NSDUH2015to2019DataHet$MESC2)
+plyr::count(NSDUH2015to2019DataHet$CATAG6)
+plyr::count(NSDUH2015to2019DataHet$irsex)
+plyr::count(NSDUH2015to2019DataHet$NEWRACE2)
+plyr::count(NSDUH2015to2019DataHet$income)
+plyr::count(NSDUH2015to2019DataHet$cocflag)
+plyr::count(NSDUH2015to2019DataHet$herflag)
+plyr::count(NSDUH2015to2019DataHet$pcpflag)
+plyr::count(NSDUH2015to2019DataHet$mrjflag)
+plyr::count(NSDUH2015to2019DataHet$KetamineVar)
+plyr::count(NSDUH2015to2019DataHet$amdeimp)
+plyr::count(NSDUH2015to2019DataHet$PoppersVariable)
+
+```
+
+
+```{r}
+####NSDUH SURVEY DESIGN###
+ #Now, it is time to incorporate the survey weighting. I use the survey package to specify weights
+ #vestr = strata; verep = cluster/id variable
+ #This link details how to include survey data: https://stylizeddata.com/how-to-use-survey-weights-in-r/
+ #Overall
+totalDesign <- survey::svydesign(id      = ~verep,
+                                      strata  = ~vestr,
+                                      weights = ~ANALWT_pooled,
+                                      nest    = TRUE,
+                                      data    = NSDUH2015to2019Data)
+
+
+hetDesign <- survey::svydesign(id      = ~verep,
+                                      strata  = ~vestr,
+                                      weights = ~ANALWT_pooled,
+                                      nest    = TRUE,
+                                      data    = NSDUH2015to2019DataHet)
+
+
+biDesign <- survey::svydesign(id      = ~verep,
+                                               strata  = ~vestr,
+                                               weights = ~ANALWT_pooled,
+                                               nest    = TRUE,
+                                               data    = NSDUH2015to2019DataBis)
+
+
+lezDesign <- survey::svydesign(id      = ~verep,
+                                           strata  = ~vestr,
+                                           weights = ~ANALWT_pooled,
+                                           nest    = TRUE,
+                                           data    = NSDUH2015to2019GayLesbian)
+
+
+```
+
+
+#######################SECTION 1: OVERALL SAMPLE ECSTASY/PSYCHEDELIC USE ANALYSES###################
+```{r}
+# Exploring the data - ensuring sufficient sample size 
+ #  Count occurrences of psilocybin use and calculate percentages within each sexident group
+NSDUH2015to2019Data %>%
+  group_by(sexident, PSILCY2) %>%
+  dplyr::summarise(count = n(), .groups = 'drop') %>%
+  # Calculate the percentage within each sexident group
+  group_by(sexident) %>%
+  mutate(percentage = (count / sum(count)) * 100) %>%
+  arrange(sexident, PSILCY2)
+
+ # Count occurrences of Ecstasy Use by sexident
+ # Count occurrences and calculate percentages within each sexident group
+NSDUH2015to2019Data %>%
+  group_by(sexident, EcstasyVariable) %>%
+  dplyr::summarise(count = n(), .groups = 'drop') %>%
+  # Calculate the percentage within each sexident group
+  group_by(sexident) %>%
+  mutate(percentage = (count / sum(count)) * 100) %>%
+  arrange(sexident, EcstasyVariable)
+```
+PSYCHOLOGICAL DISTRESS
+
+### PSY DIS Overall
+```{r} 
+
+PSYDISTMODEL2015to2019 <- survey::svyglm(spdmon ~ EcstasyVariable + PSILCY2+ lsdflag + PEYOTE2 +MESC2 + MarriageVariable+  EducationVariable+ CATAG6+irsex+ income+ NEWRACE2+ sexident +KetamineVar +  PoppersVariable+
+                                 RiskyVariable+ cocflag+ herflag+ pcpflag+  InhalantVariable + PainRelieverVariable+ TranquilizerVariable +
+                                 StimulantVariable+ SedativeVariable+ mrjflag+year, data=NSDUH2015to2019Data,family=quasibinomial(), design=totalDesign)
+summary(PSYDISTMODEL2015to2019)
+DistressModelOdds2015to2019 <- exp(cbind(OR = coef(PSYDISTMODEL2015to2019), or_confint(PSYDISTMODEL2015to2019)))
+DistressModelOdds2015to2019
+DistressModelOdds2015to2019 <- round(DistressModelOdds2015to2019, digits =2)
+DistressModelOdds2015to2019[c(2,3),]
+```
+
+### Psilocybin SO Interaction
+```{r}
+
+PSYDISTMODEL2015to2019INTERpsilthree <- survey::svyglm(spdmon ~ EcstasyVariable + sexident*PSILCY2 + cocflag+  lsdflag  + KetamineVar + PoppersVariable+ PEYOTE2 +MESC2 + MarriageVariable+ EducationVariable+ CATAG6+ NEWRACE2 +irsex+ income+
+                                                RiskyVariable+ herflag+ pcpflag+  InhalantVariable + PainRelieverVariable+ TranquilizerVariable+
+                                                StimulantVariable+ SedativeVariable+ mrjflag+year, data=NSDUH2015to2019Data,family=quasibinomial(), design=totalDesign)
+summary(PSYDISTMODEL2015to2019INTERpsilthree)
+```
+
+
+# Suicidal Ideation 
+### Suicidal Ideation Overall 
+```{r}
+# Suicidal Ideation 
+### Suicidal Ideation Overall 
+SUITHINKMODEL2015to2019 <- survey::svyglm(mhsuithk ~ EcstasyVariable + PSILCY2+ lsdflag + KetamineVar +  PoppersVariable+ PEYOTE2 +MESC2 + MarriageVariable+EducationVariable+ CATAG6+  sexident +irsex+ NEWRACE2+ income+
+                                 RiskyVariable+ cocflag+ herflag+ pcpflag+  InhalantVariable + PainRelieverVariable+ TranquilizerVariable+
+                                 StimulantVariable+ SedativeVariable+ mrjflag+year, data=NSDUH2015to2019Data,family=quasibinomial(), design=totalDesign)
+              
+summary(SUITHINKMODEL2015to2019)
+SUITHINKModelOdds2015to2019 <- exp(cbind(OR = coef(SUITHINKMODEL2015to2019), or_confint(SUITHINKMODEL2015to2019)))
+SUITHINKModelOdds2015to2019
+SUITHINKModelOdds2015to2019 <- round(SUITHINKModelOdds2015to2019, digits =2)
+SUITHINKModelOdds2015to2019[c(2:4),]
+             
+```
+### Psilocybin SO Interaction
+```{r}
+
+SUITHINKMODEL2015to2019INTERpsilthree <- survey::svyglm(mhsuithk ~ EcstasyVariable+ sexident*PSILCY2 + lsdflag + PEYOTE2 +MESC2 + MarriageVariable+ EducationVariable+ CATAG6+  KetamineVar + PoppersVariable + irsex+ income+NEWRACE2 + 
+                                                     RiskyVariable+ cocflag+ herflag+ pcpflag+  InhalantVariable + PainRelieverVariable+ TranquilizerVariable+
+                                                     StimulantVariable+ SedativeVariable+ mrjflag+year, data=NSDUH2015to2019Data,family=quasibinomial(), design=totalDesign)
+
+summary(SUITHINKMODEL2015to2019INTERpsilthree)
+SUITHINKMODEL2015to2019INTERpsilthree_OR <- or_table(SUITHINKMODEL2015to2019INTERpsilthree)
+SUITHINKMODEL2015to2019INTERpsilthree_OR
+
+```
+### MDMA SO Interaction
+```{r}
+
+SUITHINKMODEL2015to2019INTERecstthree <- survey::svyglm(mhsuithk ~ sexident*EcstasyVariable+ PSILCY2 + KetamineVar +  PoppersVariable+ lsdflag + PEYOTE2 +MESC2 + MarriageVariable+ EducationVariable+CATAG6 +  irsex+ income+NEWRACE2 +
+                                                     RiskyVariable+ cocflag+ herflag+ pcpflag+  InhalantVariable + PainRelieverVariable+ TranquilizerVariable+
+                                                     StimulantVariable+ SedativeVariable+ mrjflag+year, data=NSDUH2015to2019Data,family=quasibinomial(), design=totalDesign)
+
+summary(SUITHINKMODEL2015to2019INTERecstthree)
+SUITHINKMODEL2015to2019INTERecstthree_OR <- or_table(SUITHINKMODEL2015to2019INTERecstthree)
+SUITHINKMODEL2015to2019INTERecstthree_OR
+```
+## Significant interaction between bisexual identity x psilocybin use
+## So, I proceed with subgroup analysis
+## Suicidal Ideation by Sexual Identity 
+### Heterosexual
+```{r}
+## Suicidal Ideation by Sexual Identity 
+### Heterosexual
+SUITHINKMODEL2015to2019HET <- survey::svyglm(mhsuithk ~ EcstasyVariable + PSILCY2+ lsdflag + KetamineVar +  PoppersVariable+ PEYOTE2 +MESC2 + MarriageVariable+ EducationVariable+ CATAG6+ NEWRACE2+ irsex+  income+
+                                           RiskyVariable+ cocflag+ herflag+ pcpflag+  InhalantVariable + PainRelieverVariable+ TranquilizerVariable+
+                                           StimulantVariable+ SedativeVariable+ mrjflag+year, data=NSDUH2015to2019DataHet,family=quasibinomial(), design=hetDesign)
+summary(SUITHINKMODEL2015to2019HET)
+SUITHINKModelOdds2015to2019HET <- exp(cbind(OR = coef(SUITHINKMODEL2015to2019HET), or_confint(SUITHINKMODEL2015to2019HET)))
+SUITHINKModelOdds2015to2019HET
+SUITHINKModelOdds2015to2019HET <- round(SUITHINKModelOdds2015to2019HET, digits =2)
+SUITHINKModelOdds2015to2019HET[c(2,3),]
+```
+# Gay and Lesbian
+```{r}
+
+SUITHINKMODEL2015to2019Lez <- survey::svyglm(mhsuithk ~ EcstasyVariable + PSILCY2+ lsdflag + PEYOTE2 +MESC2 + KetamineVar +  PoppersVariable+MarriageVariable+ EducationVariable+ CATAG6+ NEWRACE2+ irsex+  income+
+                                           RiskyVariable+ cocflag+ herflag+ pcpflag+  InhalantVariable + PainRelieverVariable+ TranquilizerVariable+
+                                           StimulantVariable+ SedativeVariable+ mrjflag+year, data=NSDUH2015to2019GayLesbian,family=quasibinomial(), design=lezDesign)
+summary(SUITHINKMODEL2015to2019Lez)
+SUITHINKModelOdds2015to2019Lez <- exp(cbind(OR = coef(SUITHINKMODEL2015to2019Lez), or_confint(SUITHINKMODEL2015to2019Lez)))
+SUITHINKModelOdds2015to2019Lez
+SUITHINKModelOdds2015to2019Lez <- round(SUITHINKModelOdds2015to2019Lez, digits =2)
+SUITHINKModelOdds2015to2019Lez[c(2,3),]
+
+```
+# Bisexual
+```{r}
+
+
+SUITHINKMODEL2015to2019Bi <- survey::svyglm(mhsuithk ~ EcstasyVariable + PSILCY2+ lsdflag + PEYOTE2 +MESC2 + MarriageVariable+ EducationVariable+ CATAG6+ NEWRACE2+ irsex+  income+
+                                           RiskyVariable+ cocflag+ herflag+ KetamineVar +  PoppersVariable+pcpflag+  InhalantVariable + PainRelieverVariable+ TranquilizerVariable+
+                                           StimulantVariable+ SedativeVariable+ mrjflag+year, data=NSDUH2015to2019DataBis,family=quasibinomial(), design=biDesign)
+summary(SUITHINKMODEL2015to2019Bi)
+SUITHINKModelOdds2015to2019Bi <- exp(cbind(OR = coef(SUITHINKMODEL2015to2019Bi), or_confint(SUITHINKMODEL2015to2019Bi)))
+SUITHINKModelOdds2015to2019Bi
+SUITHINKModelOdds2015to2019Bi <- round(SUITHINKModelOdds2015to2019Bi, digits =2)
+SUITHINKModelOdds2015to2019Bi[c(2,3),]
+```
+
+
+# Suicidal Planning
+### Suicidal Planning Overall 
+```{r}
+# Suicidal Planning
+### Suicidal Planning Overall 
+
+SUIPLANMODEL2015to2019 <- survey::svyglm(mhsuipln ~ EcstasyVariable + PSILCY2+ lsdflag + PEYOTE2 +MESC2 + MarriageVariable+ EducationVariable+ CATAG6+ sexident + irsex+ NEWRACE2+ income+ KetamineVar +  PoppersVariable+ 
+                                 RiskyVariable+ cocflag+ herflag+ pcpflag+  InhalantVariable + PainRelieverVariable+ TranquilizerVariable+
+                                 StimulantVariable+ SedativeVariable+ mrjflag+year, data=NSDUH2015to2019Data,family=quasibinomial(), design=totalDesign)
+summary(SUIPLANMODEL2015to2019)
+SUIPLANModelOdds2015to2019 <- exp(cbind(OR = coef(SUIPLANMODEL2015to2019), or_confint(SUIPLANMODEL2015to2019)))
+SUIPLANModelOdds2015to2019
+SUIPLANModelOdds2015to2019 <- round(SUIPLANModelOdds2015to2019, digits =2)
+SUIPLANModelOdds2015to2019[c(2:4),]
+```
+
+### MDMA SO Interaction
+```{r}
+
+SUICPLANMODEL2015to2019INTERecstthree <- survey::svyglm(mhsuipln ~ sexident*EcstasyVariable+cocflag+ PSILCY2 + lsdflag + PEYOTE2 +MESC2 + MarriageVariable+ EducationVariable+CATAG6+ NEWRACE2 +  irsex+ income+ KetamineVar + PoppersVariable+ 
+                                                     RiskyVariable+ herflag+ pcpflag+  InhalantVariable + PainRelieverVariable+ TranquilizerVariable+
+                                                     StimulantVariable+ SedativeVariable+ mrjflag+year, data=NSDUH2015to2019Data,family=quasibinomial(), design=totalDesign)
+
+summary(SUICPLANMODEL2015to2019INTERecstthree)
+SUICPLANMODEL2015to2019INTERecstthree_OR <- or_table(SUICPLANMODEL2015to2019INTERecstthree)
+SUICPLANMODEL2015to2019INTERecstthree_OR
+```
+
+
+## Past year MDE
+# Past year MDE
+```{r}
+# Past Year MDE
+###  Past Year MDE Overall 
+
+pstyrMDEMODEL2015to2019 <- survey::svyglm(amdeyr ~ EcstasyVariable + PSILCY2+ lsdflag + PEYOTE2 +MESC2 + MarriageVariable+ EducationVariable+ CATAG6+ irsex + sexident + PoppersVariable+KetamineVar +NEWRACE2+ income+  
+                                 RiskyVariable+ cocflag+ herflag+ pcpflag+  InhalantVariable + PainRelieverVariable+ TranquilizerVariable+
+                                 StimulantVariable+ SedativeVariable+ mrjflag+year, data=NSDUH2015to2019Data,family=quasibinomial(), design=totalDesign)
+```
+
+```{r}
+summary(pstyrMDEMODEL2015to2019)
+pstyrMDEModelOdds2015to2019 <- exp(cbind(OR = coef(pstyrMDEMODEL2015to2019), or_confint(pstyrMDEMODEL2015to2019)))
+pstyrMDEModelOdds2015to2019
+pstyrMDEModelOdds2015to2019 <- round(pstyrMDEModelOdds2015to2019, digits =2)
+pstyrMDEModelOdds2015to2019[c(2:4),]
+```
+### Psilocybin SO Interaction
+```{r}
+
+
+pstyrMDEMODEL2015to2019INTERpsilthree <- survey::svyglm(amdeyr ~ EcstasyVariable+ sexident*PSILCY2 +cocflag+ lsdflag + PEYOTE2 +MESC2 + MarriageVariable+ EducationVariable+ CATAG6+ NEWRACE2 + irsex+ income+
+                                                     RiskyVariable+ herflag+ pcpflag+  InhalantVariable + PainRelieverVariable+ TranquilizerVariable+KetamineVar +  PoppersVariable+ 
+                                                     StimulantVariable+ SedativeVariable+ mrjflag+year, data=NSDUH2015to2019Data,family=quasibinomial(), design=totalDesign)
+
+summary(pstyrMDEMODEL2015to2019INTERpsilthree)
+pstyrMDEMODEL2015to2019INTERpsilthree_OR <- or_table(pstyrMDEMODEL2015to2019INTERpsilthree)
+pstyrMDEMODEL2015to2019INTERpsilthree_OR
+```
+### MDMA SO Interaction
+```{r}
+
+pstyrMDEMODEL2015to2019INTERecstthree <- survey::svyglm(amdeyr ~ sexident*EcstasyVariable+ PSILCY2 + lsdflag + PEYOTE2 +MESC2 + MarriageVariable+ EducationVariable+CATAG6+ NEWRACE2 +  irsex+ income+
+                                                     RiskyVariable+ cocflag+ herflag+ pcpflag+  InhalantVariable + PainRelieverVariable+ TranquilizerVariable+KetamineVar +  PoppersVariable+ 
+                                                     StimulantVariable+ SedativeVariable+ mrjflag+year, data=NSDUH2015to2019Data,family=quasibinomial(), design=totalDesign)
+
+summary(pstyrMDEMODEL2015to2019INTERecstthree)
+pstyrMDEMODEL2015to2019INTERecstthree_OR <- or_table(pstyrMDEMODEL2015to2019INTERecstthree)
+pstyrMDEMODEL2015to2019INTERecstthree_OR
+```
+
+# Lifetime MDE
+### Lifetime MDE Overall 
+```{r}
+
+
+lifetimeMDEMODEL2015to2019 <- survey::svyglm(amdelt ~ EcstasyVariable + PSILCY2+ lsdflag + PEYOTE2 +MESC2 + MarriageVariable+ EducationVariable+ CATAG6+ sexident + irsex+ NEWRACE2+ income+
+                                 RiskyVariable+ cocflag+ herflag+ pcpflag+ InhalantVariable + PainRelieverVariable+ TranquilizerVariable+KetamineVar +PoppersVariable+ 
+                                 StimulantVariable+ SedativeVariable+ mrjflag+year, data=NSDUH2015to2019Data,family=quasibinomial(), design=totalDesign)
+
+```
+```{r}
+summary(lifetimeMDEMODEL2015to2019)
+lifetimeMDEModelOdds2015to2019 <- exp(cbind(OR = coef(lifetimeMDEMODEL2015to2019), or_confint(lifetimeMDEMODEL2015to2019)))
+lifetimeMDEModelOdds2015to2019
+lifetimeMDEModelOdds2015to2019 <- round(lifetimeMDEModelOdds2015to2019, digits = 2)
+lifetimeMDEModelOdds2015to2019[c(2:4),]
+```
+### Psilocybin SO Interaction
+```{r}
+
+lifetimeMDEMODEL2015to2019INTERpsilthree <- survey::svyglm(amdelt ~ EcstasyVariable+ sexident*PSILCY2 + lsdflag + PEYOTE2 +MESC2 + cocflag+MarriageVariable+ EducationVariable+ CATAG6+ NEWRACE2 + irsex+ income+
+                                                     RiskyVariable+  herflag+ pcpflag+ InhalantVariable + PainRelieverVariable+ TranquilizerVariable+KetamineVar +  PoppersVariable+ 
+                                                     StimulantVariable+ SedativeVariable+ mrjflag+year, data=NSDUH2015to2019Data,family=quasibinomial(), design=totalDesign)
+
+summary(lifetimeMDEMODEL2015to2019INTERpsilthree)
+lifetimeMDEMODEL2015to2019INTERpsilthree_OR <- or_table(lifetimeMDEMODEL2015to2019INTERpsilthree)
+lifetimeMDEMODEL2015to2019INTERpsilthree_OR
+```
+### MDMA SO Interaction
+```{r}
+
+
+lifetimeMDEMODEL2015to2019INTERecstthree <- survey::svyglm(amdelt ~ sexident*EcstasyVariable+ PSILCY2 + lsdflag + PEYOTE2 +MESC2 + MarriageVariable+ EducationVariable+CATAG6+ NEWRACE2 + irsex+ income+
+                                                     RiskyVariable+ cocflag+ herflag+ pcpflag+ InhalantVariable + PainRelieverVariable+ TranquilizerVariable+KetamineVar + PoppersVariable+ 
+                                                     StimulantVariable+ SedativeVariable+ mrjflag+year, data=NSDUH2015to2019Data,family=quasibinomial(), design=totalDesign)
+
+summary(lifetimeMDEMODEL2015to2019INTERecstthree)
+lifetimeMDEMODEL2015to2019INTERecstthree_OR <- or_table(lifetimeMDEMODEL2015to2019INTERecstthree)
+lifetimeMDEMODEL2015to2019INTERecstthree_OR
+```
+
+# Severe MDE
+### Severe MDE Overall
+```{r}
+
+severeMDEMODEL2015to2019 <- survey::svyglm(amdeimp ~ EcstasyVariable + PSILCY2+ lsdflag + PEYOTE2 +MESC2 + MarriageVariable+ EducationVariable+ CATAG6+ sexident + irsex+NEWRACE2+ income+
+                                 RiskyVariable+ cocflag+ herflag+ pcpflag+ InhalantVariable + PainRelieverVariable+ TranquilizerVariable+KetamineVar +  PoppersVariable+ 
+                                 StimulantVariable+ SedativeVariable+ mrjflag+year, data=NSDUH2015to2019Data,family=quasibinomial(), design=totalDesign)
+summary(severeMDEMODEL2015to2019)
+severeMDEModelOdds2015to2019 <- exp(cbind(OR = coef(severeMDEMODEL2015to2019), or_confint(severeMDEMODEL2015to2019)))
+severeMDEModelOdds2015to2019
+severeMDEModelOdds2015to2019 <- round(severeMDEModelOdds2015to2019, digits = 2)
+severeMDEModelOdds2015to2019[c(2:4),]
+
+```
+### Psilocybin SO Interaction
+```{r}
+
+severeMDEMODEL2015to2019INTERpsilthree <- survey::svyglm(amdeimp ~ EcstasyVariable+ sexident* PSILCY2 + cocflag+lsdflag + PEYOTE2 +MESC2 + MarriageVariable+ EducationVariable+ CATAG6+ NEWRACE2 + irsex+ income+ RiskyVariable+ cocflag+ herflag+ pcpflag+ InhalantVariable + PainRelieverVariable+ TranquilizerVariable+KetamineVar +  PoppersVariable+ StimulantVariable+ SedativeVariable+ mrjflag+year, data=NSDUH2015to2019Data ,family=quasibinomial(), design=totalDesign)
+
+summary(severeMDEMODEL2015to2019INTERpsilthree)
+severeMDEMODEL2015to2019INTERpsilthree_OR <- or_table(severeMDEMODEL2015to2019INTERpsilthree)
+severeMDEMODEL2015to2019INTERpsilthree_OR
+```
+### MDMA SO Interaction
+```{r}
+
+severeMDEMODEL2015to2019INTERecstthree <- survey::svyglm(amdeimp ~ sexident*EcstasyVariable+ PSILCY2 + lsdflag + PEYOTE2 +MESC2 + MarriageVariable+ EducationVariable+CATAG6+ NEWRACE2 + irsex+ income+RiskyVariable+ cocflag+ herflag+ pcpflag+ InhalantVariable + PainRelieverVariable+ TranquilizerVariable+KetamineVar + PoppersVariable+ 
+StimulantVariable+ SedativeVariable+ mrjflag+year, data=NSDUH2015to2019Data,family=quasibinomial(), design= totalDesign)
+
+summary(severeMDEMODEL2015to2019INTERecstthree)
+severeMDEMODEL2015to2019INTERecstthree_OR <- or_table(severeMDEMODEL2015to2019INTERecstthree)
+severeMDEMODEL2015to2019INTERecstthree_OR
+```
+## Significant interaction found between bisexual identity and lifetime psilocybin use
+## So, we proceed with subgroup analysis
+## Severe MDE by Sexual Identity 
+### Heterosexual 
+```{r}
+
+
+severeMDEMODEL2015to2019HET <- survey::svyglm(amdeimp ~ EcstasyVariable + PSILCY2+ lsdflag + PEYOTE2 +MESC2 + MarriageVariable+ EducationVariable+ CATAG6+ NEWRACE2+ irsex+ income+
+                                           RiskyVariable+ cocflag+ herflag+ pcpflag+ InhalantVariable + PainRelieverVariable+ TranquilizerVariable+KetamineVar +  PoppersVariable+ 
+                                           StimulantVariable+ SedativeVariable+ mrjflag+year, data=NSDUH2015to2019DataHet,family=quasibinomial(), design=hetDesign)
+summary(severeMDEMODEL2015to2019HET)
+severeMDEMODEL2015to2019HET_OR <- or_table(severeMDEMODEL2015to2019HET)   # display only; keeps severeMDEMODEL2015to2019HET as the svyglm object
+severeMDEMODEL2015to2019HET_OR
+```
+### Gay and Lesbian
+```{r}
+
+severeMDEMODEL2015to2019LG <- survey::svyglm(amdeimp ~ EcstasyVariable + PSILCY2+ lsdflag + PEYOTE2 +MESC2 + MarriageVariable+ EducationVariable+ CATAG6+ NEWRACE2+ irsex+ income+
+                                           RiskyVariable+ cocflag+ herflag+ pcpflag+ InhalantVariable + PainRelieverVariable+ TranquilizerVariable+ KetamineVar +  PoppersVariable+ 
+                                           StimulantVariable+ SedativeVariable+ mrjflag+year, data=NSDUH2015to2019GayLesbian,family=quasibinomial(), design=lezDesign)
+
+summary(severeMDEMODEL2015to2019LG)
+severeMDEMODEL2015to2019LG_OR <- or_table(severeMDEMODEL2015to2019LG)   # display only; keeps severeMDEMODEL2015to2019LG as the svyglm object
+severeMDEMODEL2015to2019LG_OR
+```
+### Bisexual 
+```{r}
+severeMDEMODEL2015to2019Bi <- survey::svyglm(amdeimp ~ EcstasyVariable + PSILCY2+ lsdflag + PEYOTE2 +MESC2 + MarriageVariable+ EducationVariable+ CATAG6+ NEWRACE2+ irsex+ income+
+                                           RiskyVariable+ cocflag+ herflag+ pcpflag+ InhalantVariable + PainRelieverVariable+ TranquilizerVariable+KetamineVar + PoppersVariable+ 
+                                           StimulantVariable+ SedativeVariable+ mrjflag+year, data=NSDUH2015to2019DataBis,family=quasibinomial(), design=biDesign)
+summary(severeMDEMODEL2015to2019Bi)
+severeMDEMODEL2015to2019Bi_OR <- or_table(severeMDEMODEL2015to2019Bi)   # display only; keeps severeMDEMODEL2015to2019Bi as the svyglm object
+severeMDEMODEL2015to2019Bi_OR
+```
+
+# ============================================================
+# Tables for publication
+# ============================================================
+
+## Table 1 — Sample demographics, psychedelic use, mental-health outcomes, and covariates by sexual orientation
+Survey-weighted percentages; categorical comparisons use svychisq (Rao–Scott second-order correction).
+```{r}
+
+# tableone::svyCreateTableOne builds a survey-weighted "Table 1" and tests categorical
+# variables with svychisq(), whose default F statistic is the Rao-Scott second-order correction.
+t1_vars <- c(
+  "EcstasyVariable", "PSILCY2",                                   # psychedelic use
+  "irsex", "CATAG6", "NEWRACE2", "EducationVariable", "income",
+  "MarriageVariable", "RiskyVariable",                            # demographics
+  "lsdflag", "PEYOTE2", "MESC2", "cocflag", "herflag", "pcpflag",
+  "InhalantVariable", "PainRelieverVariable", "TranquilizerVariable",
+  "StimulantVariable", "SedativeVariable", "mrjflag",
+  "KetamineVar", "PoppersVariable",                              # other lifetime substance use
+  "spdmon", "mhsuithk", "mhsuipln", "amdelt", "amdeyr", "amdeimp" # mental-health outcomes
+)
+
+table1 <- svyCreateTableOne(
+  vars       = t1_vars,
+  strata     = "sexident",
+  data       = totalDesign,     # survey design with pooled 5-year weights
+  factorVars = t1_vars,         # treat all variables as categorical -> weighted percentages
+  test       = TRUE             # svychisq() default = Rao-Scott second-order F
+)
+
+# Capture the formatted table as a character matrix WITHOUT console-printing it, then render a
+# clean table with knitr::kable. (Printing the raw tableone object is what looks "weird" --
+# it prints a quoted, misaligned character matrix.)
+t1mat <- print(
+  table1,
+  format        = "p",     # survey-weighted percentages
+  digits        = 1,
+  pDigits       = 5,
+  explain       = FALSE,
+  showAllLevels = FALSE,   # one row per binary variable; set TRUE to show every level
+  noSpaces      = TRUE,    # strip leading spaces that misalign columns
+  printToggle   = FALSE
+)
+
+knitr::kable(
+  t1mat,
+  caption = "Table 1. Sample demographics, psychedelic use, mental-health outcomes, and covariates by sexual orientation (survey-weighted %; Rao-Scott second-order chi-square)."
+)
+
+# Export:
+# write.csv(t1mat, "table1_demographics.csv")
+```
+
+## Table 2 — interaction screen (sexual identity x drug)
+```{r}
+interaction_models <- c(
+  "SPD (PM) x Psilocybin"               = "PSYDISTMODEL2015to2019INTERpsilthree",
+  "Suicidal Ideation (PY) x Psilocybin" = "SUITHINKMODEL2015to2019INTERpsilthree",
+  "Suicidal Ideation (PY) x MDMA"       = "SUITHINKMODEL2015to2019INTERecstthree",
+  "Suicidal Planning (PY) x MDMA"       = "SUICPLANMODEL2015to2019INTERecstthree",
+  "Past-Year MDE x Psilocybin"          = "pstyrMDEMODEL2015to2019INTERpsilthree",
+  "Past-Year MDE x MDMA"                = "pstyrMDEMODEL2015to2019INTERecstthree",
+  "Lifetime MDE x Psilocybin"           = "lifetimeMDEMODEL2015to2019INTERpsilthree",
+  "Lifetime MDE x MDMA"                 = "lifetimeMDEMODEL2015to2019INTERecstthree",
+  "Severe MDE (PY) x Psilocybin"        = "severeMDEMODEL2015to2019INTERpsilthree",
+  "Severe MDE (PY) x MDMA"              = "severeMDEMODEL2015to2019INTERecstthree"
+
+)
+
+table2 <- do.call(rbind, lapply(names(interaction_models), function(lab){
+  obj <- interaction_models[[lab]]
+  if (!exists(obj) || !inherits(get(obj), "svyglm")) {
+    warning("Skipping (missing/overwritten): ", obj); return(NULL)
+  }
+  tab <- or_table(get(obj))
+  int <- tab[grepl(":", tab$term), ]                 # sexident x drug interaction rows
+  if (nrow(int) == 0) return(NULL)
+  data.frame(screen = lab, int, row.names = NULL)
+}))
+table2$CI   <- sprintf("%.2f (%.2f, %.2f)", table2$OR, table2$lower, table2$upper)
+table2$q_BH <- round(p.adjust(table2$p, method = "BH"), 5)   # FDR across the screen
+# The p-value is the quantity of interest for the moderation screen; the interaction OR is
+# reported for completeness only. Flag significant rows (*) and foreground p (smallest first).
+table2$sig  <- ifelse(table2$p <= .05, "*", "")
+table2 <- table2[order(table2$p), c("screen", "term", "p", "sig", "q_BH", "OR", "CI")]
+table2$p    <- formatC(table2$p,    format = "f", digits = 5)   # fixed 5 dp: borderline reads e.g. 0.04950, not 0.05
+table2$q_BH <- formatC(table2$q_BH, format = "f", digits = 5)
+print(table2, row.names = FALSE)
+# Optional visually highlighted version for the knitted supplement (requires kableExtra):
+# library(kableExtra)
+# kbl(table2, caption = "Interaction screen (p-value is the quantity of interest)") |>
+#   kable_styling() |> column_spec(3, bold = TRUE) |>
+#   row_spec(which(table2$sig == "*"), background = "#FFF3CD")
+# write.csv(table2, "table2_interaction_screen.csv", row.names = FALSE)
+```
+
+## Table 3 — stratified subgroup models (psilocybin main effect within identity)
+```{r}
+strat_spec <- list(
+  list(lab="Severe MDE (PY) | Heterosexual",        obj="severeMDEMODEL2015to2019HET"),
+  list(lab="Severe MDE (PY) | Gay/Lesbian",         obj="severeMDEMODEL2015to2019LG"),
+  list(lab="Severe MDE (PY) | Bisexual",            obj="severeMDEMODEL2015to2019Bi"),
+  list(lab="Suicidal Ideation (PY) | Heterosexual", obj="SUITHINKMODEL2015to2019HET"),
+  list(lab="Suicidal Ideation (PY) | Gay/Lesbian",  obj="SUITHINKMODEL2015to2019Lez"),
+  list(lab="Suicidal Ideation (PY) | Bisexual",     obj="SUITHINKMODEL2015to2019Bi")
+)
+table3 <- do.call(rbind, lapply(strat_spec, function(s){
+  if (!exists(s$obj) || !inherits(get(s$obj), "svyglm")) {
+    warning("Skipping (missing/overwritten): ", s$obj); return(NULL)
+  }
+  tab <- or_table(get(s$obj))
+  row <- tab[grepl("^PSILCY2", tab$term), ]          # psilocybin main effect in stratum
+  if (nrow(row) == 0) return(NULL)
+  data.frame(stratum = s$lab, row, row.names = NULL)
+}))
+table3$CI <- sprintf("%.2f (%.2f, %.2f)", table3$OR, table3$lower, table3$upper)
+table3 <- table3[, c("stratum", "CI", "p")]
+table3$p <- formatC(table3$p, format = "f", digits = 5)   # fixed 5 dp
+print(table3)
+# write.csv(table3, "table3_stratified.csv", row.names = FALSE)
+```
+
+## Consistency check — every interaction model's CIs and p-values should agree
+```{r}
+invisible(lapply(interaction_models, function(obj){
+  if (exists(obj) && inherits(get(obj), "svyglm")) { cat(obj, ": "); check_consistency(get(obj)) }
+}))
+```
+
+
+## Supplementary Table — full-sample associations (psilocybin & MDMA/ecstasy main effects, all respondents)
+
+```{r}
+fullsample_models <- c(
+  "Past-month psychological distress" = "PSYDISTMODEL2015to2019",
+  "Past-year suicidal ideation"       = "SUITHINKMODEL2015to2019",
+  "Past-year suicidal planning"       = "SUIPLANMODEL2015to2019",
+  "Past-year MDE"                     = "pstyrMDEMODEL2015to2019",
+  "Lifetime MDE"                      = "lifetimeMDEMODEL2015to2019",
+  "Severe past-year MDE"              = "severeMDEMODEL2015to2019"
+)
+
+full_sample_table <- do.call(rbind, lapply(names(fullsample_models), function(lab){
+  obj <- fullsample_models[[lab]]
+  if (!exists(obj) || !inherits(get(obj), "svyglm")) { warning("Missing model: ", obj); return(NULL) }
+  tab  <- or_table(get(obj))                                  # design-df OR / 95% CI / p
+  rows <- tab[grepl("^PSILCY2", tab$term) | grepl("^EcstasyVariable", tab$term), ]
+  if (nrow(rows) == 0) return(NULL)
+  rows$Substance <- ifelse(grepl("^PSILCY2", rows$term), "Psilocybin", "MDMA/ecstasy")
+  rows$aOR_95CI  <- sprintf("%.2f (%.2f, %.2f)", rows$OR, rows$lower, rows$upper)
+  data.frame(Outcome = lab, Substance = rows$Substance,
+             aOR = rows$OR, aOR_95CI = rows$aOR_95CI, p = rows$p, row.names = NULL)
+}))
+# order psilocybin then MDMA within each outcome, in the outcome order above
+full_sample_table <- full_sample_table[
+  order(match(full_sample_table$Outcome, names(fullsample_models)),
+        full_sample_table$Substance == "MDMA/ecstasy"), ]
+full_sample_table$p <- formatC(full_sample_table$p, format = "f", digits = 5)   # fixed 5 dp
+print(full_sample_table, row.names = FALSE)
+# write.csv(full_sample_table, "table_full_sample_associations.csv", row.names = FALSE)
+```
+
+## Session information (for reproducibility)
+```{r}
+sessionInfo()
+```
