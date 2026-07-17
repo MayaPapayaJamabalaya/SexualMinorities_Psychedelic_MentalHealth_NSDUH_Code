@@ -53,7 +53,8 @@ No random-number generation is used, so results are **deterministic**.
 
 ## Associated manuscript
 
-[Add full citation / DOI / preprint link once available.]
+Sexual identity as a moderator of associations between lifetime MDMA/ecstasy or psilocybin use and mental health outcomes: An exploratory analysis of a nationally representative sample using NSDUH 2015–2019
+https://doi.org/10.21203/rs.3.rs-10208910/v1
 
 ## How to cite
 
@@ -63,8 +64,10 @@ If you use this code, please cite the associated manuscript (above) and/or this 
 
 ## License
 
-[Add a license — e.g., MIT for the code. NSDUH data are governed by SAMHSA's terms of use and are not redistributed here.]
+ NSDUH data are governed by SAMHSA's terms of use and are not redistributed here.
 
 ## Author
 
-Maya A. Seale (she/her) — [affiliation / contact]
+Maya A. Seale (she/her) — Center for Psychedelic Research, Pneuma Science, Draper, UT, USA
+ mayaamelieseale@gmail.com
+
