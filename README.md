@@ -2,7 +2,7 @@
 
 Analysis code for a study testing whether **sexual identity moderates the associations between lifetime MDMA/ecstasy and psilocybin use and mental-health outcomes** in U.S. adults, using pooled **National Survey on Drug Use and Health (NSDUH) 2015–2019** data.
 
-> **Short description (for the GitHub "About" field):**
+> ****
 > Survey-weighted R analysis testing sexual-identity moderation of lifetime psychedelic (MDMA/ecstasy, psilocybin) associations with psychological distress, suicidality, and major depressive episodes in NSDUH 2015–2019.
 
 ---
